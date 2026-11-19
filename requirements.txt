@@ -1,0 +1,4 @@
+# Rewrite + pack build (any machine)
+anthropic>=2.10
+tqdm>=4.65
+mutagen>=1.46

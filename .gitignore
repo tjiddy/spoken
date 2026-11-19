@@ -1,0 +1,12 @@
+# upstream checkout (python -m jackson fetch)
+vendor/
+# rendered audio and built packs: large, rebuildable
+audio/
+dist/
+# voice recordings are personal; never commit them
+voices/*
+!voices/README.md
+.env
+__pycache__/
+*.pyc
+.venv/

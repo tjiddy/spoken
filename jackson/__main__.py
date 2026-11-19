@@ -6,7 +6,7 @@
   import  FILE.json [--model NAME]  add rewrites made elsewhere ({lineId: text}) to the cache
   show    [selection]         print original vs rewrite side by side
   script  [selection]         write data/recording-script.md for the voice donor
-  render  [selection] --voice NAME   render rewrites with F5-TTS (local GPU)
+  render  [selection] --voice NAME   render with Chatterbox (or --engine f5) on a local GPU
   build                       build dist/SpokenCommunity_jackson (+ .zip)
   install --addons DIR        copy the built pack into WoW's Interface/AddOns
 
@@ -72,11 +72,19 @@ def main():
     p = sub.add_parser("render")
     _selection(p)
     p.add_argument("--voice", required=True, help="folder name under voices/")
-    p.add_argument("--speed", type=float, default=1.0)
-    p.add_argument("--nfe-step", type=int, default=32, help="quality/speed tradeoff (16-64)")
-    p.add_argument("--take", type=int, default=0, help="change to get a different reading")
+    p.add_argument("--engine", choices=["chatterbox", "f5"], default="chatterbox")
+    p.add_argument("--takes", type=int, default=3, help="best of N takes per chunk (1 = no checking)")
+    p.add_argument("--no-verify", action="store_true", help="skip the Whisper check")
+    p.add_argument("--exaggeration", type=float, default=0.7,
+                   help="chatterbox: intensity, 0.25 calm .. 1.0+ unhinged")
+    p.add_argument("--cfg-weight", type=float, default=0.35,
+                   help="chatterbox: lower = slower, more deliberate pacing (pairs with high exaggeration)")
+    p.add_argument("--temperature", type=float, default=0.8)
+    p.add_argument("--speed", type=float, default=1.0, help="f5 only")
+    p.add_argument("--nfe-step", type=int, default=32, help="f5 only: quality/speed tradeoff")
+    p.add_argument("--variant", type=int, default=0, help="change to get different readings")
     p.add_argument("--force", action="store_true", help="re-render existing clips")
-    p.add_argument("--device", help="e.g. cuda, cuda:0, cpu")
+    p.add_argument("--device", default="cuda")
 
     p = sub.add_parser("build")
     p.add_argument("--version", default="0.1.0")
@@ -149,9 +157,11 @@ def main():
     elif args.cmd == "render":
         from . import render
         _, chosen = _select(args)
-        print(render.render(chosen, _texts(chosen), args.voice, speed=args.speed,
-                            nfe_step=args.nfe_step, take=args.take, force=args.force,
-                            device=args.device))
+        print(render.render(chosen, _texts(chosen), args.voice, engine=args.engine,
+                            takes=args.takes, verify=not args.no_verify, variant=args.variant,
+                            force=args.force, device=args.device, exaggeration=args.exaggeration,
+                            cfg_weight=args.cfg_weight, temperature=args.temperature,
+                            speed=args.speed, nfe_step=args.nfe_step))
 
     elif args.cmd == "build":
         from . import pack

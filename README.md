@@ -68,15 +68,23 @@ Only clone your own voice or the voice of someone who has agreed to it.
 
 ## 3. Render (on the GPU machine)
 
+See `requirements-tts.txt` for the three install steps (CUDA 12.8 PyTorch for the 5090 first).
+
 ```bash
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128   # RTX 50-series
-pip install -r requirements-tts.txt
-python -m jackson render --region northshire --voice me
+python -m jackson render --region ashenvale --voice me
 ```
 
-Clips that already exist are skipped, so you can stop and resume whenever you like. Useful knobs:
-`--speed 1.1` (faster delivery), `--nfe-step 48` (higher quality, slower), `--take 1 --force
---quest 33` (a fresh reading of a line you didn't like).
+Default engine is Chatterbox, rendering each sentence-sized chunk up to 3 times and keeping the
+take Whisper transcribes most accurately, then stitching and loudness-normalising the line. Clips
+that already exist are skipped, so stop and resume whenever you like. Knobs:
+
+- `--exaggeration 0.9` more unhinged, `0.5` calmer (default 0.7)
+- `--cfg-weight 0.3` slower, heavier pacing; `0.5` brisker (default 0.35)
+- `--takes 5` more retries per chunk; `--takes 1` fastest, no checking
+- `--variant 1 --force --quest 1054` a fresh reading of a line you didn't like
+- `--engine f5` the lighter F5-TTS engine instead
+
+Lines Whisper never heard perfectly are listed in `audio/render-report.jsonl`.
 
 ## 4. Build and install
 

@@ -1,5 +1,22 @@
-# Rendering (your GPU machine). Install PyTorch with CUDA first, for an RTX 50-series card:
-#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# GPU rendering. Use a Python 3.12 venv.
+#
+# 1) PyTorch for CUDA 12.8 first. RTX 50-series (Blackwell) needs it; Chatterbox's own metadata
+#    pins torch 2.6, which can't run on these cards, so we install its other deps ourselves:
+#      pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# 2) pip install -r requirements-tts.txt
+# 3) pip install chatterbox-tts==0.1.7 --no-deps
+# Optional second engine: pip install f5-tts   (then --engine f5)
 -r requirements.txt
-f5-tts>=1.1.22
 soundfile>=0.12
+pyloudnorm>=0.1.1
+numpy>=1.24,<2.0
+librosa==0.11.0
+s3tokenizer
+transformers==5.2.0
+diffusers==0.29.0
+resemble-perth>=1.0.0
+conformer==0.3.2
+safetensors==0.5.3
+spacy-pkuseg
+pykakasi==2.3.0
+omegaconf

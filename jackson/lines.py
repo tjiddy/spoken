@@ -16,11 +16,13 @@ def _spawn_index(corpus: dict) -> dict:
 
 
 def in_region(line: dict, spawns: dict, region: str) -> bool:
+    """True when most of the speaker's spawns are inside the region's box, so an NPC who stands
+    in every city (the Brigadier General) doesn't count for each zone he happens to visit."""
     map_id, (x0, x1), (y0, y1) = config.REGIONS[region]
-    for spot in spawns.get(f"{line['npcType']}:{line['npcId']}") or ():
-        if spot.get("map") == map_id and x0 <= spot["x"] <= x1 and y0 <= spot["y"] <= y1:
-            return True
-    return False
+    spots = spawns.get(f"{line['npcType']}:{line['npcId']}") or ()
+    inside = sum(1 for s in spots
+                 if s.get("map") == map_id and x0 <= s["x"] <= x1 and y0 <= s["y"] <= y1)
+    return inside * 2 > len(spots)
 
 
 def select(corpus: dict, region: str = None, sources=None, quest_ids=None, npc_ids=None,

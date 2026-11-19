@@ -34,12 +34,12 @@ The rewrite step needs an Anthropic API key in `ANTHROPIC_API_KEY`.
 ## 1. Rewrite (pilot first)
 
 ```bash
-python -m jackson stats   --region northshire          # 150 lines, 16 speakers
-python -m jackson rewrite --region northshire          # live requests, ~a minute
-python -m jackson show    --region northshire --sample 5
+python -m jackson stats   --region ashenvale           # 382 lines, 53 speakers
+python -m jackson rewrite --region ashenvale           # live requests, a few minutes
+python -m jackson show    --region ashenvale --sample 5
 ```
 
-Regions: `northshire`, `valley-of-trials`, `coldridge`, `deathknell`, `shadowglen`,
+Regions: `ashenvale` (both factions), `northshire`, `valley-of-trials`, `coldridge`, `deathknell`, `shadowglen`,
 `camp-narache`. You can also select with `--quest ID...`, `--npc ID...`, `--sources gossip ...`,
 `--limit N`.
 

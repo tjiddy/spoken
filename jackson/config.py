@@ -41,4 +41,7 @@ REGIONS = {
     "deathknell": (0, (1650.0, 2050.0), (1350.0, 1850.0)),
     "shadowglen": (1, (10100.0, 10700.0), (600.0, 1150.0)),
     "camp-narache": (1, (-3200.0, -2700.0), (-450.0, 100.0)),
+    # Silverwing Outpost (x~1448) in, Braug Dimspirit in Stonetalon (x~1429) out; Felwood's
+    # Emerald Sanctuary (x~3800+) out; Azshara (y < -3700) out.
+    "ashenvale": (1, (1440.0, 3700.0), (-3600.0, 1300.0)),
 }

@@ -10,3 +10,5 @@ voices/*
 __pycache__/
 *.pyc
 .venv/
+# bakeoff renders hold your voice
+bakeoff/

@@ -68,6 +68,9 @@ Only clone your own voice or the voice of someone who has agreed to it.
 
 ## 3. Render (on the GPU machine)
 
+**Pick the engine first:** [docs/BAKEOFF.md](docs/BAKEOFF.md) renders six sample lines in your voice
+through Chatterbox, Higgs Audio v3, dots.tts, MOSS-TTS, Fish S2-Pro and Qwen3-TTS, side by side.
+
 See `requirements-tts.txt` for the three install steps (CUDA 12.8 PyTorch for the 5090 first).
 
 ```bash

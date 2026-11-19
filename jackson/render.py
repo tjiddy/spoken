@@ -107,6 +107,48 @@ class F5:
         return wav
 
 
+class Server:
+    """Any model behind an SGLang-Omni `/v1/audio/speech` server (Higgs v3, dots.tts, Fish S2-Pro,
+    MOSS-TTS, CosyVoice 3, Qwen3-TTS Base). The reference clip travels as a base64 data URL, so
+    the server needs no shared folder. `delivery` is prepended to every chunk: Higgs reads inline
+    tags like <|emotion:anger|><|prosody:expressive_high|>. `extra` is merged into each request
+    for model-specific fields (dots.tts `instructions`, `speaker_scale`, ...)."""
+
+    def __init__(self, voice_dir, url, model, temperature, delivery="", extra=None):
+        import base64
+        ref_txt = voice_dir / "ref.txt"
+        if not ref_txt.exists():
+            raise SystemExit(f"server engines need the reference transcript in {ref_txt}")
+        audio = base64.b64encode((voice_dir / "ref.wav").read_bytes()).decode()
+        self.url = url.rstrip("/") + "/v1/audio/speech"
+        self.body = {"model": model, "voice": "default", "response_format": "wav",
+                     "references": [{"audio_path": f"data:audio/wav;base64,{audio}",
+                                     "text": ref_txt.read_text(encoding="utf-8").strip()}],
+                     **({"temperature": temperature} if temperature is not None else {}),
+                     **(extra or {})}
+        self.delivery = delivery or ""
+        self.sr = None
+
+    def say(self, text, seed):
+        import io
+        import json as _json
+        import urllib.request
+        import soundfile as sf
+        body = dict(self.body, input=self.delivery + text, seed=seed % 2**31)
+        req = urllib.request.Request(self.url, data=_json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                data = resp.read()
+        except urllib.error.HTTPError as e:
+            raise SystemExit(f"{self.url} said {e.code}: {e.read()[:500]!r}")
+        wav, sr = sf.read(io.BytesIO(data), dtype="float32", always_2d=False)
+        if getattr(wav, "ndim", 1) > 1:
+            wav = wav.mean(axis=1)
+        self.sr = sr
+        return wav
+
+
 # ---------------------------------------------------------------- verification
 
 _NUMBERS = {"0": "zero", "1": "one", "2": "two", "3": "three", "4": "four", "5": "five", "6": "six",
@@ -177,12 +219,53 @@ def save_take_text(table: dict) -> None:
     tmp.replace(config.TAKE_TEXT_PATH)
 
 
+def make_engine(engine, voice_dir, device="cuda", exaggeration=0.7, cfg_weight=0.35,
+                temperature=0.8, speed=1.0, nfe_step=32, server=None):
+    if engine == "chatterbox":
+        return Chatterbox(voice_dir, device, exaggeration, cfg_weight, temperature)
+    if engine == "f5":
+        return F5(voice_dir, device, speed, nfe_step)
+    if engine == "server":
+        server = server or {}
+        return Server(voice_dir, server.get("url", "http://localhost:8000"), server["model"],
+                      server.get("temperature"), server.get("delivery", ""), server.get("extra"))
+    raise SystemExit(f"unknown engine {engine!r}")
+
+
+def render_line(tts, words, line_id, takes=1, checker=None, max_wer=0.0, variant=0, log=None):
+    """One line through chunking, best-of-N and normalisation. Returns (audio, sr, worst_wer)."""
+    import numpy as np
+    pieces, worst = [], 0.0
+    for ci, (chunk, gap) in enumerate(chunk_text(words)):
+        best = None
+        for t in range(takes):
+            wav = tts.say(chunk, _seed(line_id, ci, variant * 100 + t))
+            if not checker:
+                best = (0.0, wav, None)
+                break
+            heard = checker.hear(wav, tts.sr)
+            wer = word_error_rate(chunk, heard)
+            if best is None or wer < best[0]:
+                best = (wer, wav, heard)
+            if wer <= max_wer:
+                break
+        wer, wav, heard = best
+        worst = max(worst, wer)
+        pieces.append(np.asarray(wav, dtype="float32"))
+        if gap:
+            pieces.append(np.zeros(int(gap * tts.sr), dtype="float32"))
+        if log is not None and checker and wer > max_wer:
+            log.append({"lineId": line_id, "chunk": ci, "wer": round(wer, 3),
+                        "expected": chunk, "heard": heard})
+    return _normalise(np.concatenate(pieces), tts.sr), tts.sr, worst
+
+
 def render(lines: list, texts: dict, voice: str, engine: str = "chatterbox", takes: int = 3,
            verify: bool = True, max_wer: float = 0.0, variant: int = 0, force: bool = False,
            device: str = "cuda", exaggeration: float = 0.7, cfg_weight: float = 0.35,
-           temperature: float = 0.8, speed: float = 1.0, nfe_step: int = 32) -> dict:
+           temperature: float = 0.8, speed: float = 1.0, nfe_step: int = 32,
+           server: dict = None) -> dict:
     """`texts` maps lineId to the words to speak (the rewrite)."""
-    import numpy as np
     import soundfile as sf
     from tqdm import tqdm
 
@@ -201,52 +284,35 @@ def render(lines: list, texts: dict, voice: str, engine: str = "chatterbox", tak
     if not todo:
         return {"rendered": 0}
 
-    if engine == "chatterbox":
-        tts = Chatterbox(voice_dir, device, exaggeration, cfg_weight, temperature)
-    elif engine == "f5":
-        tts = F5(voice_dir, device, speed, nfe_step)
-    else:
-        raise SystemExit(f"unknown engine {engine!r}")
-    checker = Verifier(device) if verify and takes > 1 else None
+    tts = make_engine(engine, voice_dir, device=device, exaggeration=exaggeration,
+                      cfg_weight=cfg_weight, temperature=temperature, speed=speed,
+                      nfe_step=nfe_step, server=server)
+    checker = None
+    if verify and takes > 1:
+        try:
+            checker = Verifier(device)
+        except ImportError:
+            raise SystemExit("the Whisper check needs torch + transformers in this venv; "
+                             "install them or pass --takes 1")
 
     take_text = load_take_text()
     report_path = config.AUDIO_DIR / "render-report.jsonl"
-    stats = {"rendered": 0, "chunks": 0, "retakes": 0, "imperfect": 0}
+    stats = {"rendered": 0, "imperfect": 0}
     started = time.time()
     try:
         for line, words, out in tqdm(todo, unit="line"):
-            pieces, worst = [], 0.0
-            for ci, (chunk, gap) in enumerate(chunk_text(words)):
-                best = None
-                for t in range(takes):
-                    wav = tts.say(chunk, _seed(line["lineId"], ci, variant * 100 + t))
-                    if not checker:
-                        best = (0.0, wav, None)
-                        break
-                    heard = checker.hear(wav, tts.sr)
-                    wer = word_error_rate(chunk, heard)
-                    if best is None or wer < best[0]:
-                        best = (wer, wav, heard)
-                    if wer <= max_wer:
-                        break
-                    stats["retakes"] += 1
-                wer, wav, heard = best
-                worst = max(worst, wer)
-                stats["chunks"] += 1
-                pieces.append(wav)
-                if gap:
-                    pieces.append(np.zeros(int(gap * tts.sr), dtype=wav.dtype))
-                if checker and wer > max_wer:
-                    with open(report_path, "a", encoding="utf-8") as f:
-                        f.write(json.dumps({"lineId": line["lineId"], "chunk": ci, "wer": round(wer, 3),
-                                            "expected": chunk, "heard": heard}) + "\n")
-            audio = _normalise(np.concatenate(pieces).astype("float32"), tts.sr)
+            log = []
+            audio, sr, worst = render_line(tts, words, line["lineId"], takes, checker, max_wer,
+                                           variant, log)
             out.parent.mkdir(parents=True, exist_ok=True)
             # Ogg Vorbis straight from libsndfile: what the official packs ship.
-            sf.write(str(out), audio, tts.sr, format="OGG", subtype="VORBIS")
+            sf.write(str(out), audio, sr, format="OGG", subtype="VORBIS")
             take_text[stem(line)] = words
             stats["rendered"] += 1
             stats["imperfect"] += worst > max_wer
+            if log:
+                with open(report_path, "a", encoding="utf-8") as f:
+                    f.writelines(json.dumps(r) + "\n" for r in log)
             if stats["rendered"] % 20 == 0:
                 save_take_text(take_text)
     finally:

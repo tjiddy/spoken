@@ -7,6 +7,8 @@
   show    [selection]         print original vs rewrite side by side
   script  [selection]         write data/recording-script.md for the voice donor
   render  [selection] --voice NAME   render with Chatterbox (or --engine f5) on a local GPU
+  bakeoff --voice NAME --label X --engine E   same sample lines through one engine; adds a
+                              column to bakeoff/index.html (run once per engine)
   build                       build dist/SpokenCommunity_jackson (+ .zip)
   install --addons DIR        copy the built pack into WoW's Interface/AddOns
 
@@ -24,6 +26,41 @@ def _selection(p):
     p.add_argument("--npc", type=int, nargs="+", dest="npc_ids")
     p.add_argument("--sources", nargs="+", choices=linesel.SOURCES)
     p.add_argument("--limit", type=int)
+
+
+def _engine_args(p):
+    p.add_argument("--voice", required=True, help="folder name under voices/")
+    p.add_argument("--engine", choices=["chatterbox", "f5", "server"], default="chatterbox")
+    p.add_argument("--exaggeration", type=float, default=0.7,
+                   help="chatterbox: intensity, 0.25 calm .. 1.0+ unhinged")
+    p.add_argument("--cfg-weight", type=float, default=0.35,
+                   help="chatterbox: lower = slower, more deliberate pacing")
+    p.add_argument("--temperature", type=float, default=None,
+                   help="sampling temperature (engine default if unset)")
+    p.add_argument("--speed", type=float, default=1.0, help="f5 only")
+    p.add_argument("--nfe-step", type=int, default=32, help="f5 only")
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--server-url", default="http://localhost:8000", help="server engine")
+    p.add_argument("--server-model", help="server engine: the model the server is serving")
+    p.add_argument("--delivery", default="",
+                   help="server engine: prepended to every chunk, e.g. Higgs tags "
+                        "'<|emotion:anger|><|prosody:expressive_high|>'")
+    p.add_argument("--server-extra", default="{}",
+                   help='server engine: extra JSON fields, e.g. \'{"instructions": "furious"}\'')
+
+
+def _engine_kwargs(args):
+    import json
+    if args.engine == "server" and not args.server_model:
+        raise SystemExit("--engine server needs --server-model (what sgl-omni is serving)")
+    temp = args.temperature
+    return dict(engine=args.engine, device=args.device, exaggeration=args.exaggeration,
+                cfg_weight=args.cfg_weight,
+                temperature=temp if temp is not None else (0.8 if args.engine != "server" else None),
+                speed=args.speed, nfe_step=args.nfe_step,
+                server={"url": args.server_url, "model": args.server_model,
+                        "temperature": temp, "delivery": args.delivery,
+                        "extra": json.loads(args.server_extra)} if args.engine == "server" else None)
 
 
 def _select(args):
@@ -71,20 +108,15 @@ def main():
 
     p = sub.add_parser("render")
     _selection(p)
-    p.add_argument("--voice", required=True, help="folder name under voices/")
-    p.add_argument("--engine", choices=["chatterbox", "f5"], default="chatterbox")
+    _engine_args(p)
     p.add_argument("--takes", type=int, default=3, help="best of N takes per chunk (1 = no checking)")
     p.add_argument("--no-verify", action="store_true", help="skip the Whisper check")
-    p.add_argument("--exaggeration", type=float, default=0.7,
-                   help="chatterbox: intensity, 0.25 calm .. 1.0+ unhinged")
-    p.add_argument("--cfg-weight", type=float, default=0.35,
-                   help="chatterbox: lower = slower, more deliberate pacing (pairs with high exaggeration)")
-    p.add_argument("--temperature", type=float, default=0.8)
-    p.add_argument("--speed", type=float, default=1.0, help="f5 only")
-    p.add_argument("--nfe-step", type=int, default=32, help="f5 only: quality/speed tradeoff")
     p.add_argument("--variant", type=int, default=0, help="change to get different readings")
     p.add_argument("--force", action="store_true", help="re-render existing clips")
-    p.add_argument("--device", default="cuda")
+
+    p = sub.add_parser("bakeoff")
+    _engine_args(p)
+    p.add_argument("--label", required=True, help="column name, e.g. chatterbox-0.7 or higgs-angry")
 
     p = sub.add_parser("build")
     p.add_argument("--version", default="0.1.0")
@@ -157,11 +189,20 @@ def main():
     elif args.cmd == "render":
         from . import render
         _, chosen = _select(args)
-        print(render.render(chosen, _texts(chosen), args.voice, engine=args.engine,
-                            takes=args.takes, verify=not args.no_verify, variant=args.variant,
-                            force=args.force, device=args.device, exaggeration=args.exaggeration,
-                            cfg_weight=args.cfg_weight, temperature=args.temperature,
-                            speed=args.speed, nfe_step=args.nfe_step))
+        print(render.render(chosen, _texts(chosen), args.voice, takes=args.takes,
+                            verify=not args.no_verify, variant=args.variant, force=args.force,
+                            **_engine_kwargs(args)))
+
+    elif args.cmd == "bakeoff":
+        from . import bakeoff
+        corpus = upstream.load_corpus()
+        from .rewrite import load_cache, rewritten_text
+        cache = load_cache()
+        by_id = {l["lineId"]: l for l in corpus["lines"]}
+        texts = {i: rewritten_text(cache, by_id[i]) for i in bakeoff.SAMPLE_LINES if i in by_id}
+        texts = {k: v for k, v in texts.items() if v}
+        bakeoff.run(corpus, texts, args.voice, args.label, _engine_kwargs(args))
+        print("open", bakeoff.BAKEOFF_DIR / "index.html")
 
     elif args.cmd == "build":
         from . import pack

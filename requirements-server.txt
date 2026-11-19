@@ -1,0 +1,7 @@
+# Client side of the server engine (Higgs v3, dots.tts, Fish S2-Pro, MOSS, CosyVoice 3, Qwen3-TTS
+# served by SGLang-Omni). No PyTorch needed in this environment.
+-r requirements.txt
+soundfile>=0.12
+numpy>=1.24
+pyloudnorm>=0.1.1
+# Optional, for --takes N with the Whisper check:  pip install torch transformers

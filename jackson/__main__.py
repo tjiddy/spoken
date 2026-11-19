@@ -3,6 +3,7 @@
   fetch                       pull the pinned upstream Spoken corpus + pack builder
   stats   [selection]         how many lines/characters a selection covers
   rewrite [selection]         rewrite lines with Claude (live), or --batch / --collect ID
+  import  FILE.json [--model NAME]  add rewrites made elsewhere ({lineId: text}) to the cache
   show    [selection]         print original vs rewrite side by side
   script  [selection]         write data/recording-script.md for the voice donor
   render  [selection] --voice NAME   render rewrites with F5-TTS (local GPU)
@@ -56,6 +57,10 @@ def main():
     p.add_argument("--collect", metavar="BATCH_ID", help="collect a submitted batch")
     p.add_argument("--wait", action="store_true", help="with --collect: poll until it ends")
 
+    p = sub.add_parser("import")
+    p.add_argument("files", nargs="+")
+    p.add_argument("--model", default="claude-chat", help="recorded as the rewrite's origin")
+
     p = sub.add_parser("show")
     _selection(p)
     p.add_argument("--sample", type=int, default=5)
@@ -107,6 +112,25 @@ def main():
             stats = rewrite.run_live(chosen, model=args.model, concurrency=args.concurrency,
                                      force=args.force)
             print(f"done: {stats['lines']} lines rewritten, {stats['failed']} requests failed")
+
+    elif args.cmd == "import":
+        import json
+        from .prompt import PROMPT_VERSION
+        from .rewrite import append_cache, source_hash
+        by_id = {l["lineId"]: l for l in upstream.load_corpus()["lines"]}
+        records, unknown = [], 0
+        for path in args.files:
+            with open(path, encoding="utf-8") as f:
+                for line_id, text in json.load(f).items():
+                    line = by_id.get(line_id)
+                    if not line or not text.strip():
+                        unknown += 1
+                        continue
+                    records.append({"lineId": line_id, "sourceHash": source_hash(line),
+                                    "promptVersion": PROMPT_VERSION, "model": args.model,
+                                    "original": line["text"], "text": text.strip()})
+        append_cache(records)
+        print(f"imported {len(records)} rewrites ({unknown} skipped: unknown id or empty)")
 
     elif args.cmd == "show":
         _, chosen = _select(args)

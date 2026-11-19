@@ -43,4 +43,7 @@ def select(corpus: dict, region: str = None, sources=None, quest_ids=None, npc_i
         if region and not in_region(line, spawns, region):
             continue
         chosen.append(line)
+    # A few lineIds appear twice in the corpus (e.g. Silverwing's "Talismans of Merit" vs "Marks
+    # of Honor" wordings). Both share one audio file, so keep the last, as a dict build would.
+    chosen = list({line["lineId"]: line for line in chosen}.values())
     return chosen[:limit] if limit else chosen
